@@ -260,9 +260,6 @@ async function processImageWithGPT4o(
   try {
     console.log("Processing image with GPT-4o...");
 
-    // Call the vision API with GPT-4o
-    // use generateObject from vercel ai sdk
-
     const openai = createOpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
@@ -276,7 +273,7 @@ async function processImageWithGPT4o(
         {
           role: "system",
           content:
-            "Extract all text from this image. Be comprehensive and maintain original formatting where possible.",
+            "Extract all text from this image. Be comprehensive and preserve the original formatting, including paragraphs, line breaks, bullet points, and any other structural elements. Return the text in proper markdown format.",
         },
         {
           role: "user",
@@ -611,37 +608,22 @@ export async function POST(request: NextRequest) {
 
             // Post-process the text to clean it up
             if (textContent) {
-              // Remove excessive whitespace
-              textContent = textContent.replace(/\s+/g, " ").trim();
-
-              // Fix common OCR errors
+              // Fix common OCR errors but preserve paragraphs and formatting
               textContent = textContent
                 .replace(/(\w)-\s+(\w)/g, "$1$2") // Fix hyphenated words that shouldn't be
                 .replace(/(\d),(\d)/g, "$1.$2") // Fix commas that should be decimal points in numbers
                 .replace(/(\d)\.(\d{3})/g, "$1,$2"); // Fix decimal points that should be commas in numbers
 
-              console.log(
-                "Post-processed text, final length:",
-                textContent.length
-              );
+                // Remove duplicate line breaks but preserve paragraph structure
+                textContent = textContent
+                  .replace(/\n{3,}/g, "\n\n") // Replace 3+ consecutive line breaks with just 2
+                  .trim();
+
+                console.log(
+                  "Post-processed text, final length:",
+                  textContent.length
+                );
             }
-          }
-
-          // Post-process the text to clean it up
-          if (textContent) {
-            // Remove excessive whitespace
-            textContent = textContent.replace(/\s+/g, " ").trim();
-
-            // Fix common OCR errors
-            textContent = textContent
-              .replace(/(\w)-\s+(\w)/g, "$1$2") // Fix hyphenated words that shouldn't be
-              .replace(/(\d),(\d)/g, "$1.$2") // Fix commas that should be decimal points in numbers
-              .replace(/(\d)\.(\d{3})/g, "$1,$2"); // Fix decimal points that should be commas in numbers
-
-            console.log(
-              "Post-processed text, final length:",
-              textContent.length
-            );
           }
         } catch (ocrError: unknown) {
           console.error("OCR processing error:", ocrError);
