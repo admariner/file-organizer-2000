@@ -19,6 +19,8 @@
     "doctor": "expo-doctor",
     "verify:ios-native": "bash scripts/verify-ios-native.sh",
     "verify:ios-native:quick": "bash scripts/verify-ios-native.sh --quick",
+    "verify:ios-bundle": "node scripts/verify-ios-bundle.cjs",
+    "verify:ios-bundle:refresh": "node scripts/verify-ios-bundle.cjs --refresh",
     "prebuild:ios": "expo prebuild --platform ios --clean",
     "setup:eas-secrets": "bash scripts/setup-eas-secrets.sh",
     "release:ios": "bash scripts/eas.sh build --platform ios",

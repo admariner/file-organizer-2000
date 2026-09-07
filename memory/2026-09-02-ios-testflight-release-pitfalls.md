@@ -13,7 +13,7 @@
 | Build succeeded but app still old behavior | TestFlight still on previous build number | Install latest build from TestFlight after processing |
 | **Build 24** dies on open (~131ms). TestFlight: “Crash directly when opening” | JS fatal (`RCTFatal` / `RCTExceptionsManager`). Same SIGABRT costume as build 6, but never reaches UI. Likely `useAuth` outside matching Clerk context, Clerk/`clerk-js` init, or invalid hook call. `.crash` has no JS message | Boot hardening in build 25+ (`useSafeAuth`, error boundary, no eager `@clerk/expo` on routes, production fatal guard). Rebuild + TestFlight to verify. Console.app still useful if it dies again |
 | Small splash square, then **black screen**, no crash, UI dead | Splash hidden while the JS tree is empty: (1) production fatal guard swallowed RCTFatal but a second `registerRootComponent` is a **no-op** on native; (2) `StartupGate` still force-hid splash on a timer; (3) Expo Router `Stack` was not mounted until Clerk loaded, so the native screen was a dark-mode black UIViewController; (4) expo-router’s `_internal_preventAutoHideAsync` hides splash on any `ErrorUtils` error. Auth `return null` / layouts with no background | Keep splash until a white surface + root `Stack` are mounted. Report fatals to already-mounted `BootShell` (do not re-register the root). `AuthReadyGate` / `LazyAuthProvider` must **overlay**, not replace, the navigator. Never `return null` on auth screens. Root `backgroundColor: #ffffff` |
-| **Could not start** / `undefined is not a function` on white | Module eval. **33** Toast. **34–35** `createNativeStackNavigator.js` (`isLiquidGlassAvailable()` at require-time). A resolveRequest-only glass shim did **not** stick — 35 died at the same `138647:80`. | Do not import glass from the stack fork. `extraNodeModules` + blockList real `expo-glass-effect`. Alias `createNativeStackNavigator` to a copy with `GLASS = false`. |
+| **Could not start** / `undefined is not a function` on white | Module eval. **33** Toast. **34–35** glass at require time. **38** copied fork still ran NativeWind (JSX → css-interop; `interopRequireWildcard`). **39** re-export + resolver stub worked locally, not EAS (`isLiquidGlassAvailable` undefined). Babel `overrides` **merge** with parent presets — a shim-only override does not turn NativeWind off. | Copy fork in `shims/create-native-stack-navigator.js` with `GLASS = false` and **no JSX** (`createElement`). Move `nativewind/babel` off parent presets (exclude-override). `pnpm verify:ios-bundle:refresh` inspects the whole Metro factory. |
 | **Build 6, 7, 9, 10** crash ~22–33s after launch after submit. Same phone. 6+7 Aug 9 “login / pwd submit”; 9+10 Aug 11 “after submit” (iOS 26.6) | Same class: TurboModule abort on a worker after submit. 6+7 Thread 0 = `RNSScreen setViewToSnapshot`. 9+10 Thread 0 idle (9 also launching a view service). App UUID `fc516b11…` for 6–9; build 10 is `65381518…` (binary changed, React/Hermes UUIDs unchanged). Predates handoff/keyboard workarounds | `navigateToSessionHandoff` before `setActive`; do not `Keyboard.dismiss` on iOS 26. Still waiting behind the build 24 boot crash |
 
 ## Release checklist (run in order)
@@ -22,6 +22,7 @@
    - [ ] Any `package.json` change → `pnpm install` at **monorepo root**
    - [ ] `pnpm --filter note-companion typecheck` (in `packages/mobile`)
    - [ ] Terminal has pnpm: `corepack enable && pnpm --version` → `10.8.1`
+   - [ ] **No Xcode 16.1?** `pnpm verify:ios-bundle:refresh` (JS bundle + shim checks; replaces local prebuild)
 
 2. **EAS secrets** (if env vars changed)
    - [ ] `cd packages/mobile && pnpm setup:eas-secrets`
@@ -55,7 +56,11 @@
 - `lazy-auth-provider.tsx` — Clerk import failure → `AuthLoadFailed`; children (root `Stack`) stay mounted while Clerk loads
 - `auth-ready-gate.tsx` — overlay spinner/timeout; does not unmount the navigator
 - `startup-gate.tsx` — no timed splash hide; always mounts children
-- `metro.config.js` — native `@clerk/clerk-js` → `dist/clerk.native.js`; shim expo-router Toast, css-interop `StyleSheet.create`, and `expo-glass-effect`
+- `shims/create-native-stack-navigator.js` — stack fork copy, `GLASS = false`, `React.createElement` (no JSX)
+- `babel.config.js` — `nativewind/babel` only in an exclude-override so it never runs on the stack shim
+- `metro-eval-annotate-transformer.js` — boot error path annotations (+ optional stack fork patch for node_modules if ever transpiled)
+- `scripts/verify-ios-bundle.cjs` — inspects the full Metro factory for css-interop / glass (not a 1500-char lookahead)
+- `metro.config.js` — native `@clerk/clerk-js` → `dist/clerk.native.js`; shim expo-router Toast, css-interop `StyleSheet.create`, `expo-glass-effect`
 - Sign-in/sign-up no longer top-level-import `@clerk/expo` (eager clerk-js at route eval). OAuth lives in lazy `oauth-continue-buttons.tsx`. Loading state is a white spinner, never `return null`
 
 This does **not** fix builds 6+7+9+10 (login `RNSScreen` unmount / view-service abort after submit). That still needs the handoff path to be verified after boot works.
@@ -71,7 +76,11 @@ This does **not** fix builds 6+7+9+10 (login `RNSScreen` unmount / view-service 
 - **Do not** return early from root / auth providers without the Expo Router `Stack` — an unmounted navigator is a blank native screen (black in dark mode).
 - **Do not** `require.resolve("@clerk/clerk-js")` in Metro for native — Node’s export conditions pick the browser `clerk.js`. Use `dist/clerk.native.js` whenever `platform !== "web"` (Metro often resolves with `null` / `"native"`).
 - **Do not** let Clerk’s `react-native-url-polyfill/auto` run in production Hermes — shim it; RN 0.83 already has `URL`.
-- **Do not** assume `undefined is not a function` at boot is Clerk — 33 was Toast/StyleSheet; 34 was `expo-glass-effect` (`isLiquidGlassAvailable()` at stack navigator load).
+- **Do not** leave JSX in `shims/create-native-stack-navigator.js` — NativeWind rewrites it to `react-native-css-interop/jsx-runtime` (build 38).
+- **Do not** put `nativewind/babel` on parent Babel presets and expect an override to skip it — overrides merge; NativeWind still runs.
+- **Do not** re-export expo-router’s real stack fork and trust a glass `resolveRequest` stub — works locally, fails on EAS Hermes (build 39). Copy with `GLASS = false` instead.
+- **Do not** assume `undefined is not a function` at boot is Clerk — 33 Toast/StyleSheet; 34–39 stack fork / glass.
+- **Do not** use local `prebuild` / `pod install` / `expo run:ios` on **Xcode 15.x** — RN 0.83 requires **Xcode ≥ 16.1**. Use `pnpm verify:ios-bundle:refresh` in `packages/mobile` (no Xcode).
 - **Do not** treat every TestFlight `SIGABRT` as the same bug — compare time-to-crash and Thread 0. Builds 6+7+9+10 = post-submit (~22–33s). Build 24 = JS fatal at cold start (~131ms).
 - **Do not** expect the JS exception string in a TestFlight `.crash` — use Console.app or a redbox/dev build.
 

@@ -1,7 +1,8 @@
 /**
- * expo-router's fork calls isLiquidGlassAvailable() at require() time.
- * Build 35 still threw there after a resolveRequest-only glass shim.
- * This copy never imports expo-glass-effect.
+ * expo-router stack fork with liquid-glass removed (builds 35–39).
+ * No JSX — NativeWind rewrites JSX to css-interop and that broke Hermes (38).
+ * Do not import the glass package; force GLASS = false (EAS/Hermes, 39).
+ * Babel keeps nativewind/babel off this path (see babel.config.js overrides).
  */
 "use strict";
 
@@ -132,6 +133,5 @@ function createNativeStackNavigator(config) {
   return native_1.createNavigatorFactory(NativeStackNavigator)(config);
 }
 
-exports.__esModule = true;
+Object.defineProperty(exports, "__esModule", { value: true });
 exports.createNativeStackNavigator = createNativeStackNavigator;
-exports.default = { createNativeStackNavigator };

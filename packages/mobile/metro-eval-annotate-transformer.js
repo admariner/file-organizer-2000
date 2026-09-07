@@ -102,8 +102,30 @@ function wrapProgram(program, label) {
   ];
 }
 
+/** expo-router stack fork calls isLiquidGlassAvailable() at require() time; ESM/CJS
+ *  interop for expo-glass-effect is unreliable in production Hermes (builds 35, 39). */
+function patchExpoRouterStackFork(source, filename) {
+  const normalized = String(filename || "").replace(/\\/g, "/");
+  if (
+    !normalized.includes("expo-router") ||
+    !normalized.endsWith("fork/native-stack/createNativeStackNavigator.js")
+  ) {
+    return source;
+  }
+  if (!source.includes("expo-glass-effect")) {
+    return source;
+  }
+  return source
+    .replace(/const expo_glass_effect_1 = require\(["']expo-glass-effect["']\);\r?\n/, "")
+    .replace(
+      /const GLASS = \(0, expo_glass_effect_1\.isLiquidGlassAvailable\)\(\);/,
+      "const GLASS = false;",
+    );
+}
+
 function transform(args) {
-  const result = inner.transform(args);
+  const src = patchExpoRouterStackFork(args.src, args.filename);
+  const result = inner.transform({ ...args, src });
   if (args.options?.dev || !result?.ast?.program) {
     return result;
   }
